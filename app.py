@@ -2,59 +2,71 @@ import streamlit as st
 import pandas as pd
 import os
 import re
-import xlrd  # pandas를 거치지 않고 엔진이 직접 엑셀을 뜯어내도록 강제 호출
+import xlrd
 
 # ==========================================
-#  🦅 CORE: xlrd 직통 파싱 엔진 (의존성 에러 원천 차단)
+#  🦅 CORE: CSV 텍스트와 엑셀을 완벽히 자동 감지하는 무적 파싱 엔진
 # ==========================================
 @st.cache_data
 def load_and_parse_yonsei_excel():
     """
-    pandas의 read_excel 버그를 우회하기 위해,
-    xlrd 라이브러리로 엑셀 바이너리를 직접 열어 텍스트 라인 데이터로 변환 후 파싱합니다.
+    깃허브 레포지토리에 올라온 파일 이름이 무엇이든(xls, xlsx, csv) 
+    실제 내부 데이터 구조를 자동으로 분석하여 텍스트 형식이면 텍스트로, 
+    엑셀 바이너리면 xlrd로 정밀하게 파싱합니다.
     """
-    local_filename = "time_table1(2025-2)edit.xlsx"
+    # 1. 현재 폴더에 존재하는 시간표 후보 파일 탐색
+    possible_files = [
+        "time_table1(2025-2)edit.xlsx - Sheet1.csv",
+        "time_table1(2025-2).xls",
+        "time_table1(2025-2)edit.xlsx"
+    ]
     
-    if not os.path.exists(local_filename):
-        st.error(f"❌ '{local_filename}' 파일을 찾을 수 없습니다. GitHub 레포지토리에 app.py와 함께 해당 엑셀 파일을 업로드했는지 확인해 주세요!")
+    local_filename = None
+    for f_name in possible_files:
+        if os.path.exists(f_name):
+            local_filename = f_name
+            break
+            
+    if not local_filename:
+        st.error("❌ 시간표 파일을 찾을 수 없습니다! GitHub 레포지토리에 시간표 파일이 잘 업로드되어 있는지 확인해 주세요.")
         return pd.DataFrame()
         
     lines = []
+    
+    # 2. 파일 알맹이 분석 후 자동 스위칭 읽기
     try:
-        # pandas를 거치지 않고 직접 xlrd로 엑셀 통합 문서 오픈
-        workbook = xlrd.open_workbook(local_filename)
-        sheet = workbook.sheet_by_index(0)
-        
-        # 엑셀의 모든 행을 순회하며 기존 엔진이 좋아하는 쉼표(,) 분할 텍스트 형식으로 변환
-        for row_idx in range(sheet.nrows):
-            row_values = []
-            for col_idx in range(sheet.ncols):
-                val = sheet.cell_value(row_idx, col_idx)
-                # 실수형태로 나오는 학정번호나 교시 처리 위함 (문자열 변환)
-                if isinstance(val, float) and val.is_integer():
-                    val = str(int(val))
-                else:
-                    val = str(val).strip()
-                row_values.append(val)
+        # 일단 텍스트(CSV) 형식으로 먼저 읽기 시도
+        with open(local_filename, "rb") as f:
+            file_bytes = f.read()
             
-            line_str = ",".join(row_values)
-            lines.append(line_str + "\n")
-            
-    except Exception as e:
-        try:
-            # 백업 시도: 파일이 만약 이름만 엑셀인 진짜 텍스트 CSV 일 경우 처리
-            with open(local_filename, "rb") as f:
-                file_bytes = f.read()
+        # 첫 100바이트를 검사하여 진짜 엑셀 바이너리인지, 텍스트인지 판별
+        if b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1' in file_bytes[:10] or b'PK\x03\x04' in file_bytes[:10]:
+            # [진짜 엑셀 파일 패턴 포착] -> xlrd 엔진 구동
+            workbook = xlrd.open_workbook(local_filename)
+            sheet = workbook.sheet_by_index(0)
+            for row_idx in range(sheet.nrows):
+                row_values = []
+                for col_idx in range(sheet.ncols):
+                    val = sheet.cell_value(row_idx, col_idx)
+                    if isinstance(val, float) and val.is_integer():
+                        val = str(int(val))
+                    else:
+                        val = str(val).strip()
+                    row_values.append(val)
+                lines.append(",".join(row_values) + "\n")
+        else:
+            # [일반 텍스트/CSV 패턴 포착] -> 디코딩 후 라인 분할
             try:
                 text_content = file_bytes.decode("utf-8")
             except UnicodeDecodeError:
                 text_content = file_bytes.decode("cp949")
-                
             lines = text_content.splitlines(keepends=True)
-        except Exception as inner_e:
-            st.error(f"❌ 내부 시간표 파일을 읽는 중 치명적인 오류가 발생했습니다: {e} / {inner_e}")
-            return pd.DataFrame()
+            
+    except Exception as e:
+        st.error(f"❌ 내부 시간표 파일을 해석하는 중 오류가 발생했습니다: {e}")
+        return pd.DataFrame()
         
+    # 3. 데이터 파싱 로직 가동
     parsed_courses = []
     current_major = "공통/교직"
     
@@ -117,7 +129,7 @@ def load_and_parse_yonsei_excel():
     return df
 
 
-# --- [UI/UX] 에브리타임 감성의 깔끔한 Pretendard 폰트 및 연세 블루 스타일 세팅 ---
+# --- [UI/UX] 요즘 대학생 취향의 깔끔한 Pretendard 폰트 및 모던 네이비 스타일 ---
 st.set_page_config(page_title="YONSEI GS-ED Timetable", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
@@ -137,17 +149,17 @@ st.markdown('<div class="sub-title">연세대학교 교육대학원 수강신청
 
 PREDEFINED_COLORS = ["#E2EFFE", "#FEE2E2", "#FEF3C7", "#E0F2FE", "#ECEFEE", "#F3E8FF", "#ECFDF5", "#FFF1F2", "#F0FDFA", "#EFF6FF"]
 
-# 내장 파일 엔진 기동
+# 파일 엔진 가동
 master_df = load_and_parse_yonsei_excel()
 
 if master_df.empty:
     st.stop()
 
-# 수강 신청 및 컬러 매핑 상태 관리 초기화
+# 상태 관리 초기화
 if 'my_courses' not in st.session_state: st.session_state.my_courses = []
 if 'color_map' not in st.session_state: st.session_state.color_map = {}
 
-# --- 🔗 공유된 링크(Query Parameter) 파싱 및 복원 시스템 ---
+# --- 🔗 공유 링크 복원 시스템 ---
 query_dict = st.query_params.to_dict()
 if "courses" in query_dict and not st.session_state.my_courses:
     try:
@@ -165,7 +177,6 @@ if "courses" in query_dict and not st.session_state.my_courses:
         for key in list(st.query_params.keys()):
             del st.query_params[key]
 
-# 중복 및 공강 시간 자동 필터링 엔진
 def get_available_courses(df, selected_ids):
     if not selected_ids: return df
     available_df = df[~df['학정번호'].isin(selected_ids)]
@@ -176,7 +187,7 @@ available_df = get_available_courses(master_df, st.session_state.my_courses)
 
 
 # ==========================================
-#  LAYOUT SIDEBAR: 에타 감성의 통합 검색창 & 필터
+#  LAYOUT SIDEBAR: 검색 및 필터 패널
 # ==========================================
 with st.sidebar:
     st.markdown("### 🛠️ 강좌 검색 및 필터 패널")
@@ -229,7 +240,7 @@ with st.sidebar:
 
 
 # ==========================================
-#  LAYOUT MAIN: 시각화 시간표 보드 & 장바구니 리스트
+#  LAYOUT MAIN: 시각화 시간표 보드
 # ==========================================
 if not st.session_state.my_courses:
     st.info("💡 왼쪽 사이드바에서 소속 전공이나 교직 과목을 선택하시면, 실시간 강좌 리스트가 나타납니다!")
@@ -313,7 +324,7 @@ else:
     """
     st.components.v1.html(table_html + js_downloader, height=500)
     
-    # --- 🔗 공유 시스템용 링크 구성 ---
+    # --- 🔗 공유 링크 생성 ---
     st.write(" ")
     share_link = f"https://yonseitimetable.streamlit.app/?courses={','.join(st.session_state.my_courses)}"
     
