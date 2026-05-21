@@ -5,7 +5,7 @@ import re
 
 # ==========================================
 #  🦅 CORE: 레포지토리에 함께 올린 내장 엑셀 파일을 자동 파싱하는 엔진
-# ==========================================
+# ==========================================e
 @st.cache_data
 def load_and_parse_yonsei_excel():
     """
@@ -13,7 +13,7 @@ def load_and_parse_yonsei_excel():
     외부 네트워크 통신 없이 내부 서버 경로에서 직접 안전하게 읽어와 파싱합니다.
     """
     # 깃허브 폴더 내에 함께 존재하는 시간표 파일 이름 지정
-    local_filename = "time_table1(2025-2).xls"
+    local_filename = "time_table1(2025-2)edit.xls"
     
     if not os.path.exists(local_filename):
         st.error(f"❌ '{local_filename}' 파일을 찾을 수 없습니다. GitHub 레포지토리에 app.py와 함께 해당 엑셀 파일을 업로드했는지 확인해 주세요!")
