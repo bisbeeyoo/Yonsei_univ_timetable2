@@ -2,18 +2,18 @@ import streamlit as st
 import pandas as pd
 import os
 import re
+import xlrd  # pandas를 거치지 않고 엔진이 직접 엑셀을 뜯어내도록 강제 호출
 
 # ==========================================
-#  🦅 CORE: 레포지토리에 함께 올린 내장 엑셀 파일을 자동 파싱하는 엔진
-# ==========================================e
+#  🦅 CORE: xlrd 직통 파싱 엔진 (의존성 에러 원천 차단)
+# ==========================================
 @st.cache_data
 def load_and_parse_yonsei_excel():
     """
-    깃허브 레포지토리에 app.py와 함께 업로드한 'time_table1(2025-2).xls' 파일을
-    외부 네트워크 통신 없이 내부 서버 경로에서 직접 안전하게 읽어와 파싱합니다.
+    pandas의 read_excel 버그를 우회하기 위해,
+    xlrd 라이브러리로 엑셀 바이너리를 직접 열어 텍스트 라인 데이터로 변환 후 파싱합니다.
     """
-    # 깃허브 폴더 내에 함께 존재하는 시간표 파일 이름 지정
-    local_filename = "time_table1(2025-2)edit.xls"
+    local_filename = "time_table1(2025-2).xls"
     
     if not os.path.exists(local_filename):
         st.error(f"❌ '{local_filename}' 파일을 찾을 수 없습니다. GitHub 레포지토리에 app.py와 함께 해당 엑셀 파일을 업로드했는지 확인해 주세요!")
@@ -21,15 +21,28 @@ def load_and_parse_yonsei_excel():
         
     lines = []
     try:
-        # 1차 시도: 표준 엑셀 서식으로 로컬 파일 읽기
-        excel_df = pd.read_excel(local_filename, header=None)
-        for idx, row in excel_df.iterrows():
-            line_str = ",".join([str(val).strip() if pd.notna(val) else "" for val in row])
+        # pandas를 거치지 않고 직접 xlrd로 엑셀 통합 문서 오픈
+        workbook = xlrd.open_workbook(local_filename)
+        sheet = workbook.sheet_by_index(0)
+        
+        # 엑셀의 모든 행을 순회하며 기존 엔진이 좋아하는 쉼표(,) 분할 텍스트 형식으로 변환
+        for row_idx in range(sheet.nrows):
+            row_values = []
+            for col_idx in range(sheet.ncols):
+                val = sheet.cell_value(row_idx, col_idx)
+                # 실수형태로 나오는 학정번호나 교시 처리 위함 (문자열 변환)
+                if isinstance(val, float) and val.is_integer():
+                    val = str(int(val))
+                else:
+                    val = str(val).strip()
+                row_values.append(val)
+            
+            line_str = ",".join(row_values)
             lines.append(line_str + "\n")
             
-    except Exception:
+    except Exception as e:
         try:
-            # 2차 시도: 텍스트 기반 CSV 형태로 인코딩 예외 처리하며 읽기
+            # 백업 시도: 파일이 만약 이름만 엑셀인 진짜 텍스트 CSV 일 경우 처리
             with open(local_filename, "rb") as f:
                 file_bytes = f.read()
             try:
@@ -38,8 +51,8 @@ def load_and_parse_yonsei_excel():
                 text_content = file_bytes.decode("cp949")
                 
             lines = text_content.splitlines(keepends=True)
-        except Exception as e:
-            st.error(f"❌ 내부 시간표 파일을 읽는 중 오류가 발생했습니다: {e}")
+        except Exception as inner_e:
+            st.error(f"❌ 내부 시간표 파일을 읽는 중 치명적인 오류가 발생했습니다: {e} / {inner_e}")
             return pd.DataFrame()
         
     parsed_courses = []
@@ -124,7 +137,7 @@ st.markdown('<div class="sub-title">연세대학교 교육대학원 수강신청
 
 PREDEFINED_COLORS = ["#E2EFFE", "#FEE2E2", "#FEF3C7", "#E0F2FE", "#ECEFEE", "#F3E8FF", "#ECFDF5", "#FFF1F2", "#F0FDFA", "#EFF6FF"]
 
-# 자체 시스템 내부에서 엑셀 자동 연동 처리
+# 내장 파일 엔진 기동
 master_df = load_and_parse_yonsei_excel()
 
 if master_df.empty:
