@@ -13,7 +13,7 @@ def load_and_parse_yonsei_excel():
     pandas의 read_excel 버그를 우회하기 위해,
     xlrd 라이브러리로 엑셀 바이너리를 직접 열어 텍스트 라인 데이터로 변환 후 파싱합니다.
     """
-    local_filename = "time_table1(2025-2).xls"
+    local_filename = "time_table1(2025-2)edit.xlsx"
     
     if not os.path.exists(local_filename):
         st.error(f"❌ '{local_filename}' 파일을 찾을 수 없습니다. GitHub 레포지토리에 app.py와 함께 해당 엑셀 파일을 업로드했는지 확인해 주세요!")
